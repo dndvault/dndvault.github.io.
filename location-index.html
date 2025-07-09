@@ -1,0 +1,460 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2822
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 import React, \{ useState, useEffect, useMemo \} from 'react';\
+\
+// --- Data from Uploaded Files (Hardcoded for this environment) ---\
+\
+const waterdeepLocationsRaw = `\
+ID,Name,Ward,Fictional Latitude,Fictional Longitude,Street(s)/Precise Location Details\
+CW-1,Mirt's Mansion,Castle Ward,49.960,-0.994,"On the opposite end of the mountain, close to the Naval Harbor"\
+CW-4,The Yawning Portal,Castle Ward,49.970,-0.982,"Southern Castle Ward. Built on the ruins of Halaster Blackcloak's old tower."\
+CW-32,Blackstaff Tower,Castle Ward,49.988,-0.985,"Northern Swords Street"\
+SW-51,Blue Alley,Sea Ward,49.990,-0.988,"Ivory Street (entrance opens here)"\
+SW-58,House of Heroes,Sea Ward,49.993,-0.985,"Field of Triumph frontage"\
+SW-66,Mystra's House of Wonder,Sea Ward,49.995,-0.973,"Diamond Street, Delzorin Street"\
+NW-113,Phylund family villa,North Ward,50.000,-0.991,"Copper Street near the corner of Julthoon Street"\
+TW-108,The Bowels of the Earth,Trades Ward,49.973,-0.970,"southeast corner of Snail Street and Simples Street"\
+SD-155,The Jade Dancer,Southern Ward,49.950,-0.985,"Northwest Waymoot, South Ward"\
+DW-193,The Blushing Mermaid,Dock Ward,49.950,-1.001,"Southeast Dock Street"\
+CD-1,City of the Dead Entrance,City of the Dead,49.985,-0.960,"Main Entrance"\
+`;\
+\
+const baldurGateLocationsRaw = `\
+ID,Name,District/Ward/Area,Fictional Latitude,Fictional Longitude,Street(s)/Precise Location Details\
+BG-UC-001,High Hall,Upper City,44.000,-0.500,"Central, elevated position"\
+BG-LC-006,Elfsong Tavern,Lower City,44.005,-0.505,"North-west of Stormshore Tabernacle"\
+BG-LC-007,The Blushing Mermaid,Lower City,43.990,-0.515,"In Bloomridge Park"\
+BG-LC-008,Sorcerous Sundries,Lower City,43.999,-0.502,"Southeast of Lower City Central Wall waypoint"\
+BG-LC-011,Seatower of Balduran,Lower City,43.988,-0.522,"On a rocky islet, linked by bridge"\
+BG-OC-001,Rivington,Outer City,43.994,-0.501,"Southernmost district of Baldur's Gate"\
+BG-OC-002,Wyrm's Crossing,Outer City,44.064,-0.498,"Double-bridge structure spanning Chionthar River"\
+BG-US-003,Guildhall,Undercity,43.990,-0.494,"Guildhall Entrance"\
+BG-US-004,Bhaal Temple,Undercity,44.055,-0.505,"Innermost sanctum of the Cultists of Bhaal"\
+`;\
+\
+const swordCoastLocationsRaw = `\
+Name,Category,Coordinates\
+Luskan,City,"[3167.55, 4571.90]"\
+Neverwinter,City,"[3265.2, 4202.88]"\
+Waterdeep,City,"[3702, 3322.83]"\
+Baldur's Gate,City,"[4298.8, 1861.83]"\
+Daggerford,Town,"[3965.6, 3148]"\
+Leilon,Town,"[3394.4, 3869.47]"\
+Triboar,Town,"[3818.2, 4119.34]"\
+Mirabar,City,"[3559, 4751]"\
+Candlekeep,Fortress,"[4169, 1471.25]"\
+Phandalin,Town,"[3490.9, 3953.85]"\
+`;\
+\
+const travelDistancesRaw = \{\
+    "Luskan": \{"Neverwinter": 190, "Waterdeep": 654, "Mirabar": 380\},\
+    "Neverwinter": \{"Luskan": 190, "Waterdeep": 464, "Leilon": 144\},\
+    "Waterdeep": \{"Luskan": 654, "Neverwinter": 464, "Daggerford": 150, "Baldur's Gate": 650\},\
+    "Baldur's Gate": \{"Waterdeep": 650, "Candlekeep": 120\},\
+\};\
+\
+// --- Helper Functions & Constants ---\
+\
+/**\
+ * A more robust CSV parser that handles different data formats.\
+ * @param \{string\} raw - The raw CSV string.\
+ * @param \{string\} city - The name of the city/region for context.\
+ * @param \{string\} type - The type of data ('city' or 'regional').\
+ * @returns \{Array\} - An array of parsed location objects.\
+ */\
+const parseCsv = (raw, city, type) => \{\
+    const lines = raw.trim().split('\\n');\
+    lines.shift(); // Skip header row\
+\
+    return lines.map((line, index) => \{\
+        try \{\
+            if (type === 'regional') \{ // For Sword Coast data\
+                const match = line.match(/^([^,]+),([^,]+),("\\[.*\\]")$/);\
+                if (!match) \{\
+                    console.error(`Failed to parse regional line: $\{line\}`);\
+                    return null;\
+                \}\
+                const name = match[1];\
+                const ward = match[2]; // This is 'Category'\
+                const coords = JSON.parse(match[3].replace(/"/g, ''));\
+                const lat = parseFloat(coords[0]);\
+                const lng = parseFloat(coords[1]);\
+\
+                if (isNaN(lat) || isNaN(lng)) return null;\
+\
+                return \{\
+                    id: `$\{city\}-$\{name\}`,\
+                    name: name,\
+                    ward: ward,\
+                    city: city,\
+                    lat: lat,\
+                    lng: lng,\
+                    notes: '',\
+                    type: type\
+                \};\
+            \} else \{ // For city data (Waterdeep, Baldur's Gate)\
+                const firstQuoteIndex = line.indexOf('"');\
+                \
+                if (firstQuoteIndex === -1) \{ // Line without a quoted 'notes' field\
+                    const values = line.split(',');\
+                    if (values.length < 5) return null;\
+                    const lat = parseFloat(values[3]);\
+                    const lng = parseFloat(values[4]);\
+                    if (isNaN(lat) || isNaN(lng)) return null;\
+                    \
+                    return \{\
+                        id: `$\{city\}-$\{values[0]\}`,\
+                        name: values[1],\
+                        ward: values[2],\
+                        city: city,\
+                        lat: lat,\
+                        lng: lng,\
+                        notes: values[5] || '',\
+                        type: type\
+                    \};\
+                \}\
+\
+                // Line with a quoted 'notes' field\
+                const mainPart = line.substring(0, firstQuoteIndex - 1);\
+                const notesPart = line.substring(firstQuoteIndex + 1, line.lastIndexOf('"'));\
+                const values = mainPart.split(',');\
+                \
+                if (values.length < 5) return null;\
+                const lat = parseFloat(values[3]);\
+                const lng = parseFloat(values[4]);\
+                if (isNaN(lat) || isNaN(lng)) return null;\
+\
+                return \{\
+                    id: `$\{city\}-$\{values[0]\}`,\
+                    name: values[1],\
+                    ward: values[2],\
+                    city: city,\
+                    lat: lat,\
+                    lng: lng,\
+                    notes: notesPart,\
+                    type: type\
+                \};\
+            \}\
+        \} catch (e) \{\
+            console.error(`Error parsing line $\{index + 1\}: "$\{line\}"`, e);\
+            return null;\
+        \}\
+    \}).filter(Boolean); // Filter out any nulls from failed parsing attempts\
+\};\
+\
+\
+const EUCLIDEAN_SCALE_FACTOR_CITY = 5; // 1 unit of coord diff = 5 miles\
+const EUCLIDEAN_SCALE_FACTOR_REGIONAL = 0.1; // 1 unit of coord diff = 0.1 miles\
+\
+// --- React Components ---\
+\
+const LocationPill = (\{ ward \}) => \{\
+    const wardColors = \{\
+        'Castle Ward': 'bg-red-200 text-red-800',\
+        'Sea Ward': 'bg-blue-200 text-blue-800',\
+        'North Ward': 'bg-indigo-200 text-indigo-800',\
+        'Trades Ward': 'bg-amber-200 text-amber-800',\
+        'Southern Ward': 'bg-green-200 text-green-800',\
+        'Dock Ward': 'bg-gray-300 text-gray-800',\
+        'City of the Dead': 'bg-purple-200 text-purple-800',\
+        'Upper City': 'bg-yellow-200 text-yellow-800',\
+        'Lower City': 'bg-orange-200 text-orange-800',\
+        'Outer City': 'bg-lime-200 text-lime-800',\
+        'Undercity': 'bg-stone-300 text-stone-800',\
+        'City': 'bg-sky-200 text-sky-800',\
+        'Town': 'bg-teal-200 text-teal-800',\
+        'Fortress': 'bg-slate-300 text-slate-800',\
+        'default': 'bg-gray-200 text-gray-800'\
+    \};\
+    const colorClass = wardColors[ward] || wardColors['default'];\
+    return (\
+        <span className=\{`text-xs font-medium mr-2 px-2.5 py-0.5 rounded-full $\{colorClass\}`\}>\
+            \{ward\}\
+        </span>\
+    );\
+\};\
+\
+const Map = (\{ locations, onSelectLocation, selectedLocation \}) => \{\
+    const bounds = useMemo(() => \{\
+        if (locations.length === 0) return \{ minLat: 0, maxLat: 1, minLng: 0, maxLng: 1 \};\
+        const lats = locations.map(l => l.lat);\
+        const lngs = locations.map(l => l.lng);\
+        return \{\
+            minLat: Math.min(...lats),\
+            maxLat: Math.max(...lats),\
+            minLng: Math.min(...lngs),\
+            maxLng: Math.max(...lngs),\
+        \};\
+    \}, [locations]);\
+\
+    const getPosition = (lat, lng) => \{\
+        const latRange = bounds.maxLat - bounds.minLat;\
+        const lngRange = bounds.maxLng - bounds.minLng;\
+        if (latRange === 0 || lngRange === 0) return \{ top: '50%', left: '50%' \};\
+\
+        const top = ((bounds.maxLat - lat) / latRange) * 100;\
+        const left = ((lng - bounds.minLng) / lngRange) * 100;\
+        return \{ top: `$\{top\}%`, left: `$\{left\}%` \};\
+    \};\
+    \
+    if (locations.length === 0) \{\
+        return (\
+            <div className="w-full h-full bg-gray-700 rounded-lg flex items-center justify-center text-gray-400">\
+                <p>No locations to display for this filter.</p>\
+            </div>\
+        );\
+    \}\
+\
+    return (\
+        <div className="relative w-full h-full bg-gray-800 border-2 border-gray-700 rounded-lg overflow-hidden shadow-inner">\
+            <div className="absolute inset-0 bg-cover bg-center opacity-30" style=\{\{backgroundImage: "url('https://i.imgur.com/YAgA5y1.jpg')"\}\}></div>\
+            \{locations.map(loc => \{\
+                const \{ top, left \} = getPosition(loc.lat, loc.lng);\
+                const isSelected = selectedLocation && selectedLocation.id === loc.id;\
+                return (\
+                    <div\
+                        key=\{loc.id\}\
+                        className=\{`absolute transform -translate-x-1/2 -translate-y-1/2 transition-all duration-300 $\{isSelected ? 'z-20' : 'z-10'\}`\}\
+                        style=\{\{ top, left \}\}\
+                        onClick=\{() => onSelectLocation(loc)\}\
+                    >\
+                        <div className="relative group">\
+                            <div className=\{`w-3 h-3 rounded-full cursor-pointer transition-all duration-200 $\{isSelected ? 'bg-yellow-400 scale-150 ring-2 ring-white' : 'bg-red-500 hover:bg-yellow-400'\}`\}></div>\
+                            <div className="absolute bottom-full mb-2 w-max bg-gray-900 text-white text-xs rounded py-1 px-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">\
+                                \{loc.name\}\
+                            </div>\
+                        </div>\
+                    </div>\
+                );\
+            \})\}\
+        </div>\
+    );\
+\};\
+\
+\
+const TravelCalculator = (\{ locations, onCalculate \}) => \{\
+    const [start, setStart] = useState('');\
+    const [end, setEnd] = useState('');\
+    const [travelMode, setTravelMode] = useState('Foot (Normal)');\
+\
+    const sortedLocations = useMemo(() => [...locations].sort((a, b) => a.name.localeCompare(b.name)), [locations]);\
+\
+    const handleSubmit = (e) => \{\
+        e.preventDefault();\
+        const startLoc = locations.find(l => l.id === start);\
+        const endLoc = locations.find(l => l.id === end);\
+        if (startLoc && endLoc) \{\
+            onCalculate(startLoc, endLoc, travelMode);\
+        \}\
+    \};\
+\
+    return (\
+        <form onSubmit=\{handleSubmit\} className="space-y-4 p-4 bg-gray-800 rounded-lg border border-gray-700">\
+            <h3 className="text-lg font-bold text-yellow-400">Travel Calculator</h3>\
+            <div className="space-y-2">\
+                <div>\
+                    <label htmlFor="start-loc" className="block text-sm font-medium text-gray-300">From:</label>\
+                    <select id="start-loc" value=\{start\} onChange=\{e => setStart(e.target.value)\} className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-600 bg-gray-700 text-white focus:outline-none focus:ring-yellow-500 focus:border-yellow-500 sm:text-sm rounded-md">\
+                        <option value="">Select start...</option>\
+                        \{sortedLocations.map(loc => <option key=\{loc.id\} value=\{loc.id\}>\{loc.name\}</option>)\}\
+                    </select>\
+                </div>\
+                <div>\
+                    <label htmlFor="end-loc" className="block text-sm font-medium text-gray-300">To:</label>\
+                    <select id="end-loc" value=\{end\} onChange=\{e => setEnd(e.target.value)\} className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-600 bg-gray-700 text-white focus:outline-none focus:ring-yellow-500 focus:border-yellow-500 sm:text-sm rounded-md">\
+                        <option value="">Select destination...</option>\
+                        \{sortedLocations.map(loc => <option key=\{loc.id\} value=\{loc.id\}>\{loc.name\}</option>)\}\
+                    </select>\
+                </div>\
+                 <div>\
+                    <label htmlFor="travel-mode" className="block text-sm font-medium text-gray-300">Travel Mode:</label>\
+                    <select id="travel-mode" value=\{travelMode\} onChange=\{e => setTravelMode(e.target.value)\} className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-600 bg-gray-700 text-white focus:outline-none focus:ring-yellow-500 focus:border-yellow-500 sm:text-sm rounded-md">\
+                        <option>Foot (Normal)</option>\
+                        <option>Foot (Fast)</option>\
+                        <option>Horseback (Road)</option>\
+                        <option>Wagon (Road)</option>\
+                        <option>Sailing Ship (Coastal)</option>\
+                    </select>\
+                </div>\
+            </div>\
+            <button type="submit" disabled=\{!start || !end\} className="w-full bg-yellow-500 text-gray-900 font-bold py-2 px-4 rounded-md hover:bg-yellow-400 disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors">\
+                Calculate Journey\
+            </button>\
+        </form>\
+    );\
+\};\
+\
+\
+export default function App() \{\
+    const [allLocations, setAllLocations] = useState([]);\
+    const [filteredLocations, setFilteredLocations] = useState([]);\
+    const [selectedLocation, setSelectedLocation] = useState(null);\
+    const [travelResult, setTravelResult] = useState(null);\
+    const [searchTerm, setSearchTerm] = useState('');\
+    const [activeFilter, setActiveFilter] = useState('All');\
+\
+    useEffect(() => \{\
+        // Parse all data on initial load\
+        const wdLocations = parseCsv(waterdeepLocationsRaw, 'Waterdeep', 'city');\
+        const bgLocations = parseCsv(baldurGateLocationsRaw, "Baldur's Gate", 'city');\
+        const scLocations = parseCsv(swordCoastLocationsRaw, 'Sword Coast', 'regional');\
+        \
+        const combined = [...wdLocations, ...bgLocations, ...scLocations];\
+        setAllLocations(combined);\
+        setFilteredLocations(combined);\
+    \}, []);\
+\
+    useEffect(() => \{\
+        let result = allLocations;\
+        if (activeFilter !== 'All') \{\
+            result = result.filter(loc => loc.city === activeFilter);\
+        \}\
+        if (searchTerm) \{\
+            result = result.filter(loc => loc.name.toLowerCase().includes(searchTerm.toLowerCase()));\
+        \}\
+        setFilteredLocations(result);\
+        setSelectedLocation(null);\
+        setTravelResult(null);\
+    \}, [searchTerm, activeFilter, allLocations]);\
+    \
+    const filters = useMemo(() => ['All', 'Waterdeep', "Baldur's Gate", 'Sword Coast'], []);\
+\
+    const handleCalculateTravel = (startLoc, endLoc, mode) => \{\
+        let distance = 0;\
+        \
+        // Priority 1: Check for hardcoded distance matrix\
+        if(travelDistancesRaw[startLoc.name] && travelDistancesRaw[startLoc.name][endLoc.name]) \{\
+            distance = travelDistancesRaw[startLoc.name][endLoc.name];\
+        \} else \{\
+            // Priority 2: Calculate Euclidean distance\
+            const dx = startLoc.lat - endLoc.lat;\
+            const dy = startLoc.lng - endLoc.lng;\
+            const scale = startLoc.type === 'city' ? EUCLIDEAN_SCALE_FACTOR_CITY : EUCLIDEAN_SCALE_FACTOR_REGIONAL;\
+            distance = Math.sqrt(dx * dx + dy * dy) * scale;\
+        \}\
+\
+        const paceTable = \{\
+            'Foot (Normal)': 24,\
+            'Foot (Fast)': 30,\
+            'Horseback (Road)': 50,\
+            'Wagon (Road)': 30,\
+            'Sailing Ship (Coastal)': 100\
+        \};\
+        const pace = paceTable[mode] || 24;\
+        const timeInDays = distance / pace;\
+        \
+        let timeString = '';\
+        if (timeInDays < 1) \{\
+            timeString = `$\{(timeInDays * 24).toFixed(1)\} hours`;\
+        \} else if (timeInDays < 30) \{\
+            timeString = `$\{timeInDays.toFixed(1)\} days`;\
+        \} else \{\
+            timeString = `$\{(timeInDays / 30).toFixed(1)\} months`;\
+        \}\
+        \
+        setTravelResult(\{ start: startLoc.name, end: endLoc.name, distance: distance.toFixed(1), time: timeString \});\
+        setSelectedLocation(null);\
+    \};\
+\
+    return (\
+        <div className="bg-gray-900 text-white font-sans min-h-screen flex flex-col md:flex-row p-4 gap-4">\
+            \{/* Sidebar */\}\
+            <aside className="w-full md:w-1/3 lg:w-1/4 flex flex-col gap-4">\
+                <div className="p-4 bg-gray-800 rounded-lg border border-gray-700">\
+                    <h1 className="text-2xl font-bold text-yellow-400">Location Index</h1>\
+                    <p className="text-sm text-gray-400">Forgotten Realms Atlas</p>\
+                </div>\
+\
+                \{/* Search and Filter */\}\
+                <div className="p-4 bg-gray-800 rounded-lg border border-gray-700">\
+                    <input\
+                        type="text"\
+                        placeholder="Search locations..."\
+                        value=\{searchTerm\}\
+                        onChange=\{e => setSearchTerm(e.target.value)\}\
+                        className="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:ring-yellow-500 focus:border-yellow-500"\
+                    />\
+                    <div className="flex space-x-2 mt-3 overflow-x-auto pb-2">\
+                        \{filters.map(filter => (\
+                            <button\
+                                key=\{filter\}\
+                                onClick={() => setActiveFilter(filter)}
+                                className=\{`px-3 py-1 text-sm font-medium rounded-full whitespace-nowrap transition-colors $\{activeFilter === filter ? 'bg-yellow-500 text-gray-900' : 'bg-gray-700 hover:bg-gray-600'\}`\}\
+                            >\
+                                \{filter\}\
+                            </button>\
+                        ))\}\
+                    </div>\
+                </div>\
+\
+                <TravelCalculator locations=\{allLocations\} onCalculate=\{handleCalculateTravel\} />\
+\
+                \{/* Location List */\}\
+                <div className="flex-grow bg-gray-800 rounded-lg border border-gray-700 overflow-y-auto p-2">\
+                     <ul className="space-y-2">\
+                        \{filteredLocations.map(loc => (\
+                            <li\
+                                key=\{loc.id\}\
+                                onClick=\{() => \{ setSelectedLocation(loc); setTravelResult(null); \}\}\
+                                className=\{`p-3 rounded-md cursor-pointer transition-all duration-200 $\{selectedLocation?.id === loc.id ? 'bg-yellow-500 text-gray-900 shadow-lg' : 'bg-gray-700 hover:bg-gray-600'\}`\}\
+                            >\
+                                <p className=\{`font-bold $\{selectedLocation?.id === loc.id ? 'text-gray-900' : 'text-white'\}`\}>\{loc.name\}</p>\
+                                <div className="flex items-center mt-1">\
+                                    <LocationPill ward=\{loc.ward\} />\
+                                    <span className=\{`text-xs $\{selectedLocation?.id === loc.id ? 'text-gray-800' : 'text-gray-400'\}`\}>\{loc.city\}</span>\
+                                </div>\
+                            </li>\
+                        ))\}\
+                    </ul>\
+                </div>\
+            </aside>\
+\
+            \{/* Main Content */\}\
+            <main className="w-full md:w-2/3 lg:w-3/4 flex flex-col gap-4" style=\{\{minHeight: '80vh'\}\}>\
+                <div className="flex-grow relative">\
+                    <Map locations=\{filteredLocations\} onSelectLocation=\{(loc) => \{ setSelectedLocation(loc); setTravelResult(null); \}\} selectedLocation=\{selectedLocation\} />\
+                </div>\
+                <div className="h-1/3 bg-gray-800 rounded-lg border border-gray-700 p-6 overflow-y-auto">\
+                    \{selectedLocation && (\
+                        <div className="text-center">\
+                            <h2 className="text-2xl font-bold text-yellow-400">\{selectedLocation.name\}</h2>\
+                            <div className="flex items-center justify-center my-2">\
+                                <LocationPill ward=\{selectedLocation.ward\} />\
+                                <span className="text-gray-400">\{selectedLocation.city\}</span>\
+                            </div>\
+                            <p className="text-gray-300 mt-2 max-w-md mx-auto">\{selectedLocation.notes || 'No specific information available for this location.'\}</p>\
+                            <p className="text-xs text-gray-500 mt-4">Coords: [\{selectedLocation.lat.toFixed(2)\}, \{selectedLocation.lng.toFixed(2)\}]</p>\
+                        </div>\
+                    )\}\
+                    \{travelResult && (\
+                         <div className="text-center">\
+                            <h2 className="text-2xl font-bold text-yellow-400">Journey Estimate</h2>\
+                             <p className="text-gray-300 mt-2">From <span className="font-bold text-white">\{travelResult.start\}</span> to <span className="font-bold text-white">\{travelResult.end\}</span></p>\
+                            <div className="mt-4 flex justify-center gap-8">\
+                                <div>\
+                                    <p className="text-sm text-gray-400">DISTANCE</p>\
+                                    <p className="text-2xl font-bold text-white">\{travelResult.distance\} miles</p>\
+                                </div>\
+                                <div>\
+                                    <p className="text-sm text-gray-400">EST. TIME</p>\
+                                    <p className="text-2xl font-bold text-white">\{travelResult.time\}</p>\
+                                </div>\
+                            </div>\
+                        </div>\
+                    )\}\
+                    \{!selectedLocation && !travelResult && (\
+                        <div className="flex items-center justify-center h-full text-gray-500">\
+                            <p>Select a location or calculate a journey to see details.</p>\
+                        </div>\
+                    )\}\
+                </div>\
+            </main>\
+        </div>\
+    );\
+\}\
+}
