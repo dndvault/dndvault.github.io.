@@ -15,3 +15,4 @@ Here are some ideas to get you started:
 - ⚡ Fun fact: ...
 -->
 This is a work-in-progress publication of my obsidian vault!
+It contains rulebooks, campaigns, tables, and much more. You can load this folder system inside Obsidian or any other markdown-based app for convenient management and reading.
